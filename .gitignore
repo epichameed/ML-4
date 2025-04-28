@@ -1,0 +1,79 @@
+# Dataset directories - both absolute and relative paths
+visual7w-images/
+visual7w-text/
+*/visual7w-images/
+*/visual7w-text/
+ITM_Classifier-baselines/visual7w-images/
+ITM_Classifier-baselines/visual7w-text/
+**/visual7w-images/
+**/visual7w-text/
+
+# Large data files
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+*.pkl
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# Model files
+*.pth
+*.pt
+*.ckpt
+*.model
+*.weights
+*.bin
+models/
+*/models/
+**/models/
+
+# Generated directories
+logs/
+*/logs/
+**/logs/
+videos/
+*/videos/
+**/videos/
+wandb/
+*/wandb/
+**/wandb/
+__pycache__/
+*/__pycache__/
+**/__pycache__/
+
+# Environment
+.env
+venv/
+.venv/
+env/
+.python-version
+
+# IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+**/.ipynb_checkpoints/
+
+# Generated training data
+*.monitor.csv
+*.json.gz
+*.tfevents.*
+events.out.tfevents.*
+
+# Experiment specific
+ITM_Classifier-baselines/v7w.sentence_embeddings-gtr-t5-large.pkl
+**/v7w.sentence_embeddings-gtr-t5-large.pkl
