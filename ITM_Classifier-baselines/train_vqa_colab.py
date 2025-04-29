@@ -49,6 +49,10 @@ class VQADataset(Dataset):
                 img_name, text, label = line.strip().split('\t')
                 img_path = os.path.join(self.images_path, img_name.strip())
                 
+                # Skip if image doesn't exist
+                if not os.path.exists(img_path):
+                    continue
+                
                 # Split question and answer
                 qa = text.split('?')
                 question = qa[0].strip() + '?'
@@ -65,29 +69,39 @@ class VQADataset(Dataset):
         return len(self.image_paths)
         
     def __getitem__(self, idx):
-        # Load and preprocess image
-        image = Image.open(self.image_paths[idx]).convert('RGB')
-        image = self.transform(image)
-        
-        # Get question and answer embeddings
-        question_embedding = torch.tensor(
-            self.sentence_embeddings[self.questions[idx]], 
-            dtype=torch.float32
-        )
-        answer_embedding = torch.tensor(
-            self.sentence_embeddings[self.answers[idx]], 
-            dtype=torch.float32
-        )
-        
-        # Get label
-        label = torch.tensor(self.labels[idx], dtype=torch.long)
-        
-        return {
-            'image': image,
-            'question_embedding': question_embedding,
-            'answer_embedding': answer_embedding,
-            'label': label
-        }
+        try:
+            # Load and preprocess image
+            image = Image.open(self.image_paths[idx]).convert('RGB')
+            image = self.transform(image)
+            
+            # Get question and answer embeddings
+            question_embedding = torch.tensor(
+                self.sentence_embeddings[self.questions[idx]], 
+                dtype=torch.float32
+            )
+            answer_embedding = torch.tensor(
+                self.sentence_embeddings[self.answers[idx]], 
+                dtype=torch.float32
+            )
+            
+            # Get label
+            label = torch.tensor(self.labels[idx], dtype=torch.long)
+            
+            return {
+                'image': image,
+                'question_embedding': question_embedding,
+                'answer_embedding': answer_embedding,
+                'label': label
+            }
+        except Exception as e:
+            print(f"Error loading sample {idx}: {str(e)}")
+            # Return a dummy sample
+            return {
+                'image': torch.zeros((3, 224, 224)),
+                'question_embedding': torch.zeros(768),
+                'answer_embedding': torch.zeros(768),
+                'label': torch.tensor(0)
+            }
 
 def train_epoch(model, dataloader, criterion, optimizer, device):
     model.train()
@@ -97,32 +111,41 @@ def train_epoch(model, dataloader, criterion, optimizer, device):
     
     progress_bar = tqdm(dataloader, desc='Training')
     for batch in progress_bar:
-        # Move data to device
-        images = batch['image'].to(device)
-        question_embeddings = batch['question_embedding'].to(device)
-        answer_embeddings = batch['answer_embedding'].to(device)
-        labels = batch['label'].to(device)
-        
-        # Forward pass
-        optimizer.zero_grad()
-        outputs = model(images, question_embeddings, answer_embeddings)
-        loss = criterion(outputs, labels)
-        
-        # Backward pass
-        loss.backward()
-        optimizer.step()
-        
-        # Track metrics
-        total_loss += loss.item()
-        _, predicted = outputs.max(1)
-        total += labels.size(0)
-        correct += predicted.eq(labels).sum().item()
-        
-        # Update progress bar
-        progress_bar.set_postfix({
-            'loss': f'{loss.item():.4f}',
-            'acc': f'{100.*correct/total:.2f}%'
-        })
+        try:
+            # Move data to device
+            images = batch['image'].to(device)
+            question_embeddings = batch['question_embedding'].to(device)
+            answer_embeddings = batch['answer_embedding'].to(device)
+            labels = batch['label'].to(device)
+            
+            # Forward pass
+            optimizer.zero_grad()
+            outputs = model(images, question_embeddings, answer_embeddings)
+            loss = criterion(outputs, labels)
+            
+            # Backward pass
+            loss.backward()
+            optimizer.step()
+            
+            # Track metrics
+            total_loss += loss.item()
+            _, predicted = outputs.max(1)
+            total += labels.size(0)
+            correct += predicted.eq(labels).sum().item()
+            
+            # Update progress bar
+            progress_bar.set_postfix({
+                'loss': f'{loss.item():.4f}',
+                'acc': f'{100.*correct/total:.2f}%'
+            })
+        except RuntimeError as e:
+            if "out of memory" in str(e):
+                # Clear cache and skip batch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                continue
+            else:
+                raise e
     
     return total_loss / len(dataloader), 100. * correct / total
 
@@ -135,58 +158,73 @@ def evaluate(model, dataloader, criterion, device):
     with torch.no_grad():
         progress_bar = tqdm(dataloader, desc='Evaluating')
         for batch in progress_bar:
-            images = batch['image'].to(device)
-            question_embeddings = batch['question_embedding'].to(device)
-            answer_embeddings = batch['answer_embedding'].to(device)
-            labels = batch['label'].to(device)
-            
-            outputs = model(images, question_embeddings, answer_embeddings)
-            loss = criterion(outputs, labels)
-            
-            total_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
-            correct += predicted.eq(labels).sum().item()
-            
-            # Update progress bar
-            progress_bar.set_postfix({
-                'loss': f'{loss.item():.4f}',
-                'acc': f'{100.*correct/total:.2f}%'
-            })
+            try:
+                images = batch['image'].to(device)
+                question_embeddings = batch['question_embedding'].to(device)
+                answer_embeddings = batch['answer_embedding'].to(device)
+                labels = batch['label'].to(device)
+                
+                outputs = model(images, question_embeddings, answer_embeddings)
+                loss = criterion(outputs, labels)
+                
+                total_loss += loss.item()
+                _, predicted = outputs.max(1)
+                total += labels.size(0)
+                correct += predicted.eq(labels).sum().item()
+                
+                # Update progress bar
+                progress_bar.set_postfix({
+                    'loss': f'{loss.item():.4f}',
+                    'acc': f'{100.*correct/total:.2f}%'
+                })
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    continue
+                else:
+                    raise e
     
     return total_loss / len(dataloader), 100. * correct / total
 
 def main():
     # Mount Google Drive
-    from google.colab import drive
-    drive.mount('/content/gdrive')
+    try:
+        from google.colab import drive
+        drive.mount('/content/gdrive')
+        base_path = "/content/ML-4/ITM_Classifier-baselines"
+    except ImportError:
+        base_path = "."
     
     # Parameters
-    BATCH_SIZE = 32  # Increased for faster training on GPU
+    BATCH_SIZE = 8  # Reduced batch size for Colab
     NUM_EPOCHS = 30
     LEARNING_RATE = 2e-5
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
-    # Paths (updated for Colab)
-    BASE_PATH = "/content/ML-4/ITM_Classifier-baselines"
-    IMAGES_PATH = os.path.join(BASE_PATH, "visual7w-images")
-    TRAIN_FILE = os.path.join(BASE_PATH, "visual7w-text/v7w.TrainImages.itm.txt")
-    DEV_FILE = os.path.join(BASE_PATH, "visual7w-text/v7w.DevImages.itm.txt")
-    TEST_FILE = os.path.join(BASE_PATH, "visual7w-text/v7w.TestImages.itm.txt")
-    EMBEDDINGS_FILE = os.path.join(BASE_PATH, "v7w.sentence_embeddings-gtr-t5-large.pkl")
+    # Paths
+    IMAGES_PATH = os.path.join(base_path, "visual7w-images")
+    TRAIN_FILE = os.path.join(base_path, "visual7w-text/v7w.TrainImages.itm.txt")
+    DEV_FILE = os.path.join(base_path, "visual7w-text/v7w.DevImages.itm.txt")
+    TEST_FILE = os.path.join(base_path, "visual7w-text/v7w.TestImages.itm.txt")
+    EMBEDDINGS_FILE = os.path.join(base_path, "v7w.sentence_embeddings-gtr-t5-large.pkl")
+    
+    print(f"Using device: {DEVICE}")
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
     
     # Load sentence embeddings
     print("Loading sentence embeddings...")
     with open(EMBEDDINGS_FILE, 'rb') as f:
         sentence_embeddings = pickle.load(f)
     
-    # Create datasets
+    # Create datasets with smaller training subset
     train_dataset = VQADataset(
         IMAGES_PATH, 
         TRAIN_FILE,
         sentence_embeddings,
         'train',
-        train_ratio=0.2  # Using 20% of training data as in baseline
+        train_ratio=0.1  # Using 10% of training data for Colab
     )
     
     dev_dataset = VQADataset(
@@ -203,13 +241,13 @@ def main():
         'test'
     )
     
-    # Create dataloaders with appropriate num_workers for Colab
+    # Create dataloaders with appropriate settings for Colab
     train_loader = DataLoader(
         train_dataset,
         batch_size=BATCH_SIZE,
         shuffle=True,
         num_workers=2,
-        pin_memory=True  # Faster data transfer to GPU
+        pin_memory=True if torch.cuda.is_available() else False
     )
     
     dev_loader = DataLoader(
@@ -217,7 +255,7 @@ def main():
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=2,
-        pin_memory=True
+        pin_memory=True if torch.cuda.is_available() else False
     )
     
     test_loader = DataLoader(
@@ -225,7 +263,7 @@ def main():
         batch_size=BATCH_SIZE,
         shuffle=False,
         num_workers=2,
-        pin_memory=True
+        pin_memory=True if torch.cuda.is_available() else False
     )
     
     # Initialize wandb
@@ -239,8 +277,9 @@ def main():
     # Train and evaluate models
     models = {
         'cnn-bert': CNNBertClassifier(),
-        'vit-roberta': ViTRoBERTaClassifier(),
-        'clip': CLIPZeroShotClassifier()
+        # Commenting out heavier models for Colab
+        # 'vit-roberta': ViTRoBERTaClassifier(),
+        # 'clip': CLIPZeroShotClassifier()
     }
     
     results = {}
@@ -282,11 +321,11 @@ def main():
                     "epoch": epoch
                 })
                 
-                # Save best model to Drive
+                # Save best model
                 if dev_acc > best_dev_acc:
                     best_dev_acc = dev_acc
                     best_epoch = epoch
-                    save_path = f'/content/gdrive/MyDrive/ML4_models/best_{name}_model.pth'
+                    save_path = os.path.join("/content/gdrive/MyDrive/ML4_models", f'best_{name}_model.pth')
                     os.makedirs(os.path.dirname(save_path), exist_ok=True)
                     torch.save(model.state_dict(), save_path)
                     
@@ -295,7 +334,8 @@ def main():
         
         # Load best model and evaluate on test set
         try:
-            model.load_state_dict(torch.load(f'/content/gdrive/MyDrive/ML4_models/best_{name}_model.pth'))
+            model_path = os.path.join("/content/gdrive/MyDrive/ML4_models", f'best_{name}_model.pth')
+            model.load_state_dict(torch.load(model_path))
             test_loss, test_acc = evaluate(model, test_loader, criterion, DEVICE)
             
             results[name] = {
@@ -313,7 +353,8 @@ def main():
         
         # Clean up
         del model
-        torch.cuda.empty_cache()  # Free up GPU memory
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     
     # Log final results
     for name, metrics in results.items():

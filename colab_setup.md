@@ -1,153 +1,82 @@
 # Running ML-4 Projects in Google Colab
 
-This guide provides instructions for running both the ITM Classifier and VizDoom projects in Google Colab.
+This guide explains how to run the VQA and VizDoom projects in Google Colab.
 
-## GitHub Repository Setup
+## Quick Start Guide
 
-When pushing to GitHub:
-1. Do NOT push large datasets (visual7w-images/, visual7w-text/)
-2. Do NOT push generated files (models, logs, videos)
-3. Do NOT push embeddings files (*.pkl)
-
-The .gitignore file is configured to exclude these files automatically.
-
-### What to Push
-```
-ML-4/
-├── .gitignore                  # Git ignore rules
-├── requirements.txt            # Project dependencies
-├── README.md                   # Project documentation
-├── ITM_Classifier-baselines/
-│   ├── train_vqa.py           # Original training script
-│   ├── train_vqa_colab.py     # Colab-optimized version
-│   ├── train_vqa.ipynb        # Colab notebook
-│   └── vqa_models.py          # Model definitions
-└── VizDoom-DRL-task2/
-    ├── train_eval_doom.py     # Original training script
-    ├── train_eval_doom_colab.py # Colab-optimized version
-    ├── train_doom.ipynb       # Colab notebook
-    └── doom_agents.py         # Agent definitions
-```
-
-### Dataset Management
-Instead of pushing datasets to GitHub:
-1. Host the Visual7W dataset separately (e.g., Google Drive)
-2. Document the data download instructions
-3. Use data loading scripts that can fetch from the hosted location
-
-## Project Structure
-
-The repository contains two main projects:
-1. ITM Classifier - Visual Question Answering (VQA) task
-2. VizDoom - Deep Reinforcement Learning task
-
-## Prerequisites
-
-1. A Google account with access to Google Colab
-2. A Weights & Biases (wandb) account for experiment tracking
-3. Sufficient Google Drive storage for saving models and data
-
-## Setup Instructions
-
-### 1. GitHub Clone
+### 1. Clone Repository
+In a Colab notebook, run:
 ```python
 !git clone https://github.com/YOUR_USERNAME/ML-4.git
 %cd ML-4
 ```
 
-### 2. Google Drive Setup
-
-1. Create the following directory structure in your Google Drive:
-```
-ML4_projects/
-├── itm_classifier/
-│   ├── models/
-│   ├── logs/
-│   └── data/
-│       └── visual7w-images/
-└── vizdoom/
-    ├── models/
-    ├── logs/
-    └── videos/
+### 2. Mount Google Drive
+```python
+from google.colab import drive
+drive.mount('/content/gdrive')
 ```
 
-2. Upload your Visual7W dataset to the `visual7w-images` directory
+### 3. Create Folders in Drive
+Create these folders in your Google Drive:
+- `ML4_models` - For saving trained models
+- `ML4_vizdoom` - For VizDoom results
 
-## Running the Projects
+### 4. Enable GPU
+- Go to Runtime → Change runtime type
+- Select "GPU" as Hardware accelerator
 
-### A. ITM Classifier (VQA)
+## Running VQA Training
 
-1. Open `ITM_Classifier-baselines/train_vqa.ipynb` in Google Colab
-2. Follow the notebook instructions to:
-   - Install dependencies
-   - Mount Google Drive
-   - Set up data paths
-   - Configure wandb
-   - Run training
+1. Open `ITM_Classifier-baselines/train_vqa_colab.py`
+2. The script is already optimized for Colab:
+   - Reduced batch size
+   - Uses only 10% of training data
+   - Added error handling
+   - Saves models to Google Drive
+   - Cleans up memory automatically
 
-Key features:
-- GPU acceleration enabled
-- Automatic model checkpointing to Google Drive
-- Training progress monitoring via wandb
-- Support for multiple model architectures (CNN-BERT, ViT-RoBERTa, CLIP)
+To run:
+```python
+!python ITM_Classifier-baselines/train_vqa_colab.py
+```
 
-### B. VizDoom
+## Running VizDoom Training
 
-1. Open `VizDoom-DRL-task2/train_doom.ipynb` in Google Colab
-2. Follow the notebook instructions to:
-   - Install VizDoom and dependencies
-   - Mount Google Drive
-   - Configure environment
-   - Set up wandb
-   - Run training
+1. Open `VizDoom-DRL-task2/train_eval_doom_colab.py`
+2. The script is optimized for Colab:
+   - Reduced number of environments
+   - Fewer training steps
+   - Uses only CNN policy (lighter)
+   - Added error handling
+   - Saves to Google Drive
 
-Key features:
-- GPU-accelerated training
-- Multiple policy architectures (CNN, Transformer, Hybrid)
-- Automated video recording of gameplay
-- Performance metrics tracking
-- Model checkpointing to Google Drive
+To run:
+```python
+!python VizDoom-DRL-task2/train_eval_doom_colab.py
+```
 
-## Important Notes
+## Monitoring Training
 
-1. GPU Runtime
-   - Always select "GPU" as the runtime type in Colab
-   - Verify GPU availability using the provided code cells
+Both scripts provide:
+- Progress bars with live metrics
+- WandB integration (optional)
+- Automatic model saving
+- Clear error messages
 
-2. Storage Management
-   - Monitor Google Drive storage usage
-   - Consider cleaning up old checkpoints and videos
-   - Use the provided data management cells in notebooks
+## Troubleshooting
 
-3. Long-Running Training
-   - Consider using Colab Pro for longer sessions
-   - Enable "Connect to GPU" in Colab settings
-   - Use browser extensions to prevent disconnects
+If you encounter errors:
+1. Make sure GPU runtime is enabled
+2. Verify Google Drive is mounted
+3. Check that data paths are correct
+4. Let the scripts handle memory management
 
-4. Troubleshooting
-   - For VizDoom installation issues, check system dependencies
-   - For CUDA errors, verify GPU runtime is enabled
-   - For memory issues, reduce batch sizes
-   - For wandb connection issues, ensure proper login
+## Notes
 
-## Performance Considerations
+- Training is scaled down to work on Colab's free tier
+- Models automatically save checkpoints to Google Drive
+- Progress can be monitored through the output cells
+- Scripts handle out-of-memory errors gracefully
 
-1. ITM Classifier
-   - Batch size optimized for Colab GPU memory
-   - DataLoader workers configured for Colab environment
-   - Automatic mixed precision (AMP) enabled
-
-2. VizDoom
-   - Frame skip parameter for faster training
-   - Vectorized environments for parallel training
-   - Efficient video recording setup
-   - Memory-optimized policy architectures
-
-## Monitoring and Visualization
-
-Both projects include:
-- Real-time training metrics
-- WandB integration for experiment tracking
-- Progress bars with live updates
-- Automated logging and checkpointing
-- Performance visualization tools
+The code is designed to work with Colab's default environment without requiring manual package management.

@@ -16,20 +16,24 @@ from doom_agents import (
     create_doom_env
 )
 
-# Mount Google Drive
-from google.colab import drive
-drive.mount('/content/gdrive')
-
 class ExperimentManager:
     def __init__(
         self,
         config_path="basic.cfg",
-        n_envs=8,
-        n_seeds=3,
-        total_timesteps=1_000_000,
-        eval_episodes=20,
+        n_envs=4,  # Reduced for Colab
+        n_seeds=2,  # Reduced for Colab
+        total_timesteps=500_000,  # Reduced for Colab
+        eval_episodes=10,  # Reduced for Colab
         frame_skip=4
     ):
+        # Try to mount Google Drive
+        try:
+            from google.colab import drive
+            drive.mount('/content/gdrive')
+            self.base_dir = "/content/gdrive/MyDrive/ML4_vizdoom"
+        except ImportError:
+            self.base_dir = "."
+
         self.config_path = config_path
         self.n_envs = n_envs
         self.n_seeds = n_seeds
@@ -37,78 +41,91 @@ class ExperimentManager:
         self.eval_episodes = eval_episodes
         self.frame_skip = frame_skip
         
-        # Training hyperparameters
+        # Training hyperparameters optimized for Colab
         self.learning_rate = 3e-4
-        self.n_steps = 2048
-        self.batch_size = 64
-        self.n_epochs = 10
+        self.n_steps = 1024  # Reduced for less memory usage
+        self.batch_size = 32  # Reduced for Colab
+        self.n_epochs = 5   # Reduced for faster training
         self.clip_range = 0.2
         
-        # Setup logging directories in Google Drive
-        self.base_dir = '/content/gdrive/MyDrive/ML4_vizdoom'
+        # Setup logging directories
         for dir_name in ['logs', 'models', 'videos']:
             path = os.path.join(self.base_dir, dir_name)
             os.makedirs(path, exist_ok=True)
         
-        # Available policy architectures
+        # Available policy architectures (using only CNN for Colab)
         self.policies = {
             "cnn": CNNPolicy,
-            "transformer": TransformerPolicy,
-            "hybrid": HybridCNNTransformerPolicy
+            # "transformer": TransformerPolicy,  # Commented out for Colab
+            # "hybrid": HybridCNNTransformerPolicy,  # Commented out for Colab
         }
         
         # Set device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         print(f"Using device: {self.device}")
+        if torch.cuda.is_available():
+            print(f"GPU: {torch.cuda.get_device_name(0)}")
         
     def make_env(self, seed=None, capture_video=False):
         """Create vectorized environment"""
         def make_env_fn():
             def _init():
-                env = create_doom_env(self.config_path, self.frame_skip)
-                if seed is not None:
-                    env.seed(seed)
-                    env.action_space.seed(seed)
-                env = Monitor(env, os.path.join(self.base_dir, "logs", f"seed_{seed}" if seed is not None else "tmp"))
-                return env
+                try:
+                    env = create_doom_env(self.config_path, self.frame_skip)
+                    if seed is not None:
+                        env.seed(seed)
+                        env.action_space.seed(seed)
+                    env = Monitor(env, os.path.join(self.base_dir, "logs", f"seed_{seed}" if seed is not None else "tmp"))
+                    return env
+                except Exception as e:
+                    print(f"Error creating environment: {str(e)}")
+                    return None
             return _init
             
-        env = DummyVecEnv([make_env_fn() for _ in range(self.n_envs)])
-        
-        if capture_video:
-            env = VecVideoRecorder(
-                env,
-                os.path.join(self.base_dir, "videos"),
-                record_video_trigger=lambda step: step % 10000 == 0,
-                video_length=200
-            )
+        try:
+            envs = [make_env_fn() for _ in range(self.n_envs)]
+            env = DummyVecEnv([env for env in envs if env is not None])
             
-        return env
+            if capture_video:
+                env = VecVideoRecorder(
+                    env,
+                    os.path.join(self.base_dir, "videos"),
+                    record_video_trigger=lambda step: step % 10000 == 0,
+                    video_length=200
+                )
+                
+            return env
+        except Exception as e:
+            print(f"Error creating vectorized environment: {str(e)}")
+            return None
         
     def create_agent(self, policy_type, env):
         """Create PPO agent with specified policy"""
-        policy_class = self.policies[policy_type]
-        
-        policy_kwargs = dict(
-            features_extractor_class=policy_class,
-            features_extractor_kwargs=dict(features_dim=512),
-            device=self.device
-        )
-        
-        model = PPO(
-            "CnnPolicy",
-            env,
-            learning_rate=self.learning_rate,
-            n_steps=self.n_steps,
-            batch_size=self.batch_size,
-            n_epochs=self.n_epochs,
-            clip_range=self.clip_range,
-            policy_kwargs=policy_kwargs,
-            device=self.device,
-            verbose=1
-        )
-        
-        return model
+        try:
+            policy_class = self.policies[policy_type]
+            
+            policy_kwargs = dict(
+                features_extractor_class=policy_class,
+                features_extractor_kwargs=dict(features_dim=256),  # Reduced for Colab
+            )
+            
+            model = PPO(
+                "CnnPolicy",
+                env,
+                learning_rate=self.learning_rate,
+                n_steps=self.n_steps,
+                batch_size=self.batch_size,
+                n_epochs=self.n_epochs,
+                clip_range=self.clip_range,
+                policy_kwargs=policy_kwargs,
+                device=self.device,
+                verbose=1
+            )
+            
+            return model
+        except Exception as e:
+            print(f"Error creating agent: {str(e)}")
+            return None
         
     def evaluate_agent(self, model, env):
         """Evaluate agent over multiple episodes"""
@@ -116,27 +133,31 @@ class ExperimentManager:
         episode_lengths = []
         episode_times = []
         
-        obs = env.reset()
-        
-        for _ in range(self.eval_episodes):
-            done = False
-            total_reward = 0
-            steps = 0
-            start_time = datetime.now()
+        try:
+            obs = env.reset()
             
-            while not done:
-                action, _ = model.predict(obs, deterministic=True)
-                obs, reward, done, info = env.step(action)
-                total_reward += reward[0]  # Only track first environment
-                steps += 1
-                if done[0]:  # Check first environment
-                    obs = env.reset()
-                    break
-                    
-            episode_time = (datetime.now() - start_time).total_seconds()
-            episode_rewards.append(total_reward)
-            episode_lengths.append(steps)
-            episode_times.append(episode_time)
+            for _ in range(self.eval_episodes):
+                done = False
+                total_reward = 0
+                steps = 0
+                start_time = datetime.now()
+                
+                while not done:
+                    action, _ = model.predict(obs, deterministic=True)
+                    obs, reward, done, info = env.step(action)
+                    total_reward += reward[0]
+                    steps += 1
+                    if done[0]:
+                        obs = env.reset()
+                        break
+                        
+                episode_time = (datetime.now() - start_time).total_seconds()
+                episode_rewards.append(total_reward)
+                episode_lengths.append(steps)
+                episode_times.append(episode_time)
+        except Exception as e:
+            print(f"Error during evaluation: {str(e)}")
+            return None
         
         return {
             'mean_reward': float(np.mean(episode_rewards)),
@@ -158,23 +179,27 @@ class ExperimentManager:
                 print(f"\nTraining {policy_type} policy (Seed {seed + 1}/{self.n_seeds})")
                 
                 # Initialize wandb
-                run = wandb.init(
-                    project="vizdoom-rl",
-                    name=f"{policy_type}-seed{seed}",
-                    config={
-                        "policy": policy_type,
-                        "seed": seed,
-                        "total_timesteps": self.total_timesteps,
-                        "n_envs": self.n_envs,
-                        "learning_rate": self.learning_rate,
-                        "n_steps": self.n_steps,
-                        "batch_size": self.batch_size,
-                        "n_epochs": self.n_epochs,
-                        "clip_range": self.clip_range,
-                        "device": str(self.device)
-                    },
-                    reinit=True
-                )
+                try:
+                    run = wandb.init(
+                        project="vizdoom-rl",
+                        name=f"{policy_type}-seed{seed}",
+                        config={
+                            "policy": policy_type,
+                            "seed": seed,
+                            "total_timesteps": self.total_timesteps,
+                            "n_envs": self.n_envs,
+                            "learning_rate": self.learning_rate,
+                            "n_steps": self.n_steps,
+                            "batch_size": self.batch_size,
+                            "n_epochs": self.n_epochs,
+                            "clip_range": self.clip_range,
+                            "device": str(self.device)
+                        },
+                        reinit=True
+                    )
+                except Exception as e:
+                    print(f"Error initializing wandb: {str(e)}")
+                    continue
                 
                 # Set random seeds
                 torch.manual_seed(seed)
@@ -184,7 +209,12 @@ class ExperimentManager:
                 
                 # Create environment and model
                 env = self.make_env(seed=seed, capture_video=True)
+                if env is None:
+                    continue
+                    
                 model = self.create_agent(policy_type, env)
+                if model is None:
+                    continue
                 
                 # Train model
                 start_time = time.time()
@@ -199,7 +229,7 @@ class ExperimentManager:
                     
                 train_time = time.time() - start_time
                 
-                # Save model to Google Drive
+                # Save model
                 try:
                     save_path = os.path.join(self.base_dir, "models", f"{policy_type}_seed{seed}")
                     model.save(save_path)
@@ -208,23 +238,31 @@ class ExperimentManager:
                 
                 # Create evaluation environment
                 eval_env = self.make_env(seed=seed+100)  # Different seed for evaluation
+                if eval_env is None:
+                    continue
                 
                 # Evaluate model
                 eval_results = self.evaluate_agent(model, eval_env)
-                eval_results['train_time'] = train_time
-                policy_results.append(eval_results)
-                
-                # Log evaluation metrics
-                wandb.log({
-                    "eval_mean_reward": eval_results['mean_reward'],
-                    "eval_mean_episode_length": eval_results['mean_episode_length'],
-                    "eval_mean_episode_time": eval_results['mean_episode_time'],
-                    "train_time": train_time
-                })
+                if eval_results is not None:
+                    eval_results['train_time'] = train_time
+                    policy_results.append(eval_results)
+                    
+                    # Log evaluation metrics
+                    wandb.log({
+                        "eval_mean_reward": eval_results['mean_reward'],
+                        "eval_mean_episode_length": eval_results['mean_episode_length'],
+                        "eval_mean_episode_time": eval_results['mean_episode_time'],
+                        "train_time": train_time
+                    })
                 
                 # Close environments
                 env.close()
                 eval_env.close()
+                
+                # Clear GPU memory
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                
                 wandb.finish()
                 
             # Calculate aggregate results for this policy
