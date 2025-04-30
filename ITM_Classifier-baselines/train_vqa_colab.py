@@ -191,7 +191,7 @@ def main():
     # Mount Google Drive
     try:
         from google.colab import drive
-        drive.mount('/content/gdrive')
+        # drive.mount('/content/gdrive')
         base_path = "/content/ML-4/ITM_Classifier-baselines"
     except ImportError:
         base_path = "."
